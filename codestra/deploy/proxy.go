@@ -13,6 +13,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -119,23 +120,7 @@ func runDockerAPIProxy() error {
 		http.Error(w, "docker metadata upstream unavailable", http.StatusBadGateway)
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
-			if err := dockerPing(r.Context(), transport); err != nil {
-				http.Error(w, "docker socket unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, "ok\n")
-			return
-		}
-		if !allowedDockerRequest(r) {
-			http.Error(w, "Docker API operation denied", http.StatusForbidden)
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	})
+	handler := dockerHandler(proxy, transport)
 
 	server := &http.Server{
 		Addr:              listenAddress,
@@ -147,6 +132,38 @@ func runDockerAPIProxy() error {
 	}
 	log.Printf("starting read-only Docker API proxy on %s", listenAddress)
 	return server.ListenAndServe()
+}
+
+func dockerHandler(proxy http.Handler, transport http.RoundTripper) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !readOnlyRequest(r) {
+			http.Error(w, "request denied", http.StatusForbidden)
+			return
+		}
+		if r.URL.Path == "/healthz" {
+			if r.URL.RawQuery != "" {
+				http.Error(w, "query denied", http.StatusForbidden)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			if err := dockerPing(ctx, transport); err != nil {
+				http.Error(w, "docker socket unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			if r.Method == http.MethodGet {
+				_, _ = io.WriteString(w, "ok\n")
+			}
+			return
+		}
+		if !allowedDockerRequest(r) {
+			http.Error(w, "Docker API operation denied", http.StatusForbidden)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
 }
 
 func dockerPing(ctx context.Context, transport http.RoundTripper) error {
@@ -166,11 +183,50 @@ func dockerPing(ctx context.Context, transport http.RoundTripper) error {
 	return nil
 }
 
-func allowedDockerRequest(request *http.Request) bool {
-	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+// readOnlyRequest validates the complete request envelope before any upstream
+// request, including health probes. It adds no Docker operation or public route.
+func readOnlyRequest(request *http.Request) bool {
+	if request == nil || request.URL == nil ||
+		(request.Method != http.MethodGet && request.Method != http.MethodHead) {
 		return false
 	}
-	if request.ContentLength > 0 || strings.Contains(strings.ToLower(request.Header.Get("Connection")), "upgrade") || request.Header.Get("Upgrade") != "" {
+	if request.ContentLength != 0 || len(request.TransferEncoding) != 0 || len(request.Trailer) != 0 ||
+		(request.Body != nil && request.Body != http.NoBody) {
+		return false
+	}
+	// Reject the common first-value upgrade case immediately; the loops below
+	// also inspect later header values rather than trusting Header.Get alone.
+	if request.Header.Get("Upgrade") != "" {
+		return false
+	}
+	for _, header := range request.Header.Values("Connection") {
+		for _, token := range strings.Split(header, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return false
+			}
+		}
+	}
+	for _, header := range request.Header.Values("Upgrade") {
+		if strings.TrimSpace(header) != "" {
+			return false
+		}
+	}
+	u := request.URL
+	if u.Opaque != "" || u.User != nil || u.Fragment != "" || u.ForceQuery || len(u.RawQuery) > 8192 ||
+		!strings.HasPrefix(u.Path, "/") || pathpkg.Clean(u.Path) != u.Path || strings.ContainsAny(u.Path, "\\%\x00\r\n") {
+		return false
+	}
+	if u.RawPath != "" {
+		decoded, err := url.PathUnescape(u.RawPath)
+		if err != nil || decoded != u.Path {
+			return false
+		}
+	}
+	return true
+}
+
+func allowedDockerRequest(request *http.Request) bool {
+	if !readOnlyRequest(request) {
 		return false
 	}
 
@@ -198,7 +254,12 @@ func allowedDockerRequest(request *http.Request) bool {
 		return false
 	}
 
-	for key, values := range request.URL.Query() {
+	// URL.Query silently drops malformed entries. Never authorize a partial parse.
+	query, err := url.ParseQuery(request.URL.RawQuery)
+	if err != nil {
+		return false
+	}
+	for key, values := range query {
 		if _, ok := allowedQuery[key]; !ok {
 			return false
 		}
@@ -269,17 +330,7 @@ func runMetricsProxy() error {
 		http.Error(w, "cAdvisor upstream unavailable", http.StatusBadGateway)
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method denied", http.StatusMethodNotAllowed)
-			return
-		}
-		if r.URL.RawQuery != "" || (r.URL.Path != "/metrics" && r.URL.Path != "/healthz") {
-			http.Error(w, "path denied", http.StatusForbidden)
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	})
+	handler := metricsHandler(proxy)
 
 	server := &http.Server{
 		Addr:              listenAddress,
@@ -299,4 +350,18 @@ func runMetricsProxy() error {
 	}
 	log.Printf("starting mTLS cAdvisor metrics proxy on %s", listenAddress)
 	return server.ListenAndServeTLS("", "")
+}
+
+func metricsHandler(proxy http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method denied", http.StatusMethodNotAllowed)
+			return
+		}
+		if !readOnlyRequest(r) || r.URL.RawQuery != "" || (r.URL.Path != "/metrics" && r.URL.Path != "/healthz") {
+			http.Error(w, "path denied", http.StatusForbidden)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
 }

@@ -1,0 +1,39 @@
+name: Validate cAdvisor proxy request contract
+
+on:
+  pull_request:
+  push:
+    branches: [development, test, staging, production, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-request-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: upstream/go.mod
+          cache: false
+      - name: Validate merge-result request contract
+        run: |
+          set -Eeuo pipefail
+          test -z "$(gofmt -l codestra/deploy/proxy.go codestra/deploy/proxy_request_test.go)"
+          go vet codestra/deploy/proxy.go
+          go test -race codestra/deploy/proxy.go codestra/deploy/proxy_test.go codestra/deploy/proxy_request_test.go
+      - name: Validate exact pull-request source
+        if: github.event_name == 'pull_request'
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git checkout --detach "$SOURCE_SHA"
+          go test -race codestra/deploy/proxy.go codestra/deploy/proxy_test.go codestra/deploy/proxy_request_test.go
