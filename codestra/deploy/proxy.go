@@ -194,6 +194,11 @@ func readOnlyRequest(request *http.Request) bool {
 		(request.Body != nil && request.Body != http.NoBody) {
 		return false
 	}
+	// Reject the common first-value upgrade case immediately; the loops below
+	// also inspect later header values rather than trusting Header.Get alone.
+	if request.Header.Get("Upgrade") != "" {
+		return false
+	}
 	for _, header := range request.Header.Values("Connection") {
 		for _, token := range strings.Split(header, ",") {
 			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
