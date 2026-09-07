@@ -47,6 +47,16 @@ def logical_shell_lines(source: str) -> tuple[str, ...]:
 
 def reject_protected_pushes(source: str) -> None:
     approved = ["git", "push", "origin", "HEAD:refs/heads/${SYNC_BRANCH}"]
+    # Only Git built-ins used by the pinned sync workflow are allowed. Unknown
+    # commands may resolve to aliases or git-* helpers regardless of how their
+    # configuration was written. This guard supplements, not replaces, the
+    # reviewed workflow digest and GitHub branch protections.
+    local_commands = {
+        "add", "checkout", "commit", "config", "diff", "fetch", "init",
+        "ls-remote", "merge-base", "read-tree", "remote", "rev-list",
+        "rev-parse", "rm", "show", "switch",
+    }
+    remote_writers = {"git-send-pack", "git-http-push", "git-receive-pack"}
     approved_count = 0
     for line in logical_shell_lines(source):
         try:
@@ -79,6 +89,8 @@ def reject_protected_pushes(source: str) -> None:
                     raise ValueError("protected_branch_sync_forbidden:dynamic_command")
         git_push = False
         for index, word in enumerate(words):
+            if Path(word).name in remote_writers:
+                raise ValueError("protected_branch_sync_forbidden:remote_transport")
             if Path(word).name != "git":
                 continue
             command_index = index + 1
@@ -117,11 +129,15 @@ def reject_protected_pushes(source: str) -> None:
                 "$" in words[command_index] or "`" in words[command_index]
             ):
                 raise ValueError("protected_branch_sync_forbidden:dynamic_command")
+            if command_index >= len(words):
+                raise ValueError("sync_shell_parse_failed")
+            if words[command_index] not in local_commands | {"push"}:
+                raise ValueError("protected_branch_sync_forbidden:unreviewed_git_command")
             if command_index < len(words) and words[command_index] == "push":
                 git_push = True
                 break
         nested_push = any(
-            re.search(r"\bgit\s+push\b", re.sub(r"\\([^\n])", r"\1", word))
+            re.search(r"\bgit(?:\s+(?:push|send-pack|http-push|receive-pack)|-(?:send-pack|http-push|receive-pack))\b", re.sub(r"\\([^\n])", r"\1", word))
             for word in words
         )
         dynamic_push = any(
