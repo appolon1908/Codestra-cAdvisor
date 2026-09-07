@@ -73,8 +73,9 @@ jobs:
         env:
           PYTHONPYCACHEPREFIX: /tmp/codestra-cadvisor-pycache
         run: |
-          python -m py_compile scripts/validate_repository_security.py tests/test_repository_security.py
+          python -m py_compile scripts/validate_repository_security.py tests/test_repository_security.py tests/test_repository_security_remote_writes.py
           python tests/test_repository_security.py
+          python tests/test_repository_security_remote_writes.py
           validator_args=()
           if [[ "$CADVISOR_PENDING_SYNC" == 1 ]]; then
             validator_args+=(--allow-exact-pin-bootstrap)
