@@ -243,6 +243,8 @@ def validate_runtime() -> None:
     for field in ("devKmsg", "hostNetwork", "hostPidNamespace", "privilegedMode"):
         if host_access.get(field) is not False:
             fail(f"cAdvisor host-access boundary must remain false: {field}")
+    if host_access.get("hostCgroupNamespace") is not True:
+        fail("cAdvisor must join the host cgroup namespace for complete cgroup-v2 metrics")
     if host_access.get("cadvisorRunsAsContainerRoot") is not True:
         fail("runtime must honestly record cAdvisor's container-root compatibility requirement")
     if host_access.get("cadvisorLinuxCapabilities") != []:
@@ -477,6 +479,8 @@ def validate_compose() -> None:
         fail("cAdvisor must attach only to the two internal networks")
     if cadvisor.get("user") != "0:0":
         fail("cAdvisor compatibility candidate must honestly run as container root")
+    if cadvisor.get("cgroup") != "host":
+        fail("cAdvisor must use the host cgroup namespace")
     if cadvisor.get("devices"):
         fail("cAdvisor may not receive host devices such as /dev/kmsg")
     command = {str(item) for item in cadvisor.get("command", [])}

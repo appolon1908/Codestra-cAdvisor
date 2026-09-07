@@ -100,6 +100,7 @@ services:
     restart: unless-stopped
     init: true
     user: "0:0"
+    cgroup: host
     read_only: true
     stop_grace_period: 60s
     environment:

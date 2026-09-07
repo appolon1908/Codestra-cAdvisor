@@ -38,7 +38,10 @@
   "dockerApiBoundary": {
     "socketConsumer": "docker-api-proxy-only",
     "client": "cadvisor-only",
-    "methods": ["GET", "HEAD"],
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
     "allowedResources": [
       "ping",
       "version",
@@ -135,7 +138,8 @@
     "privilegedMode": false,
     "cadvisorRunsAsContainerRoot": true,
     "cadvisorLinuxCapabilities": [],
-    "reason": "cAdvisor requires broad read-only host and container metadata. It runs as UID 0 only inside a non-privileged, capability-dropped, read-only container; production remains blocked until host-access compatibility and denial tests pass."
+    "reason": "cAdvisor requires broad read-only host and container metadata. It runs as UID 0 only inside a non-privileged, capability-dropped, read-only container; production remains blocked until host-access compatibility and denial tests pass.",
+    "hostCgroupNamespace": true
   },
   "authorityBoundaries": {
     "cadvisorOwnsContainerResourceMetrics": true,
