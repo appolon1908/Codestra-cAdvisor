@@ -5,20 +5,22 @@
   "authority": "container-metrics",
   "exposure": "private",
   "native_ports": [
-    8080
+    8080,
+    9443,
+    2375
   ],
   "inputs": [
     "container-runtime:read-only",
     "host:cgroups"
   ],
   "outputs": [
-    "alloy:metrics"
+    "prometheus:metrics (mTLS GET /metrics through cadvisor-metrics-proxy:9443)"
   ],
   "controls": [
-    "read-only runtime and host mounts",
-    "container labels are allowlisted to avoid secrets and tenant PII",
-    "no public listener",
-    "no container lifecycle mutation permissions"
+    "cAdvisor 8080 stays on the private cadvisor-metrics network behind the 9443 mTLS proxy",
+    "Prometheus scrapes the metrics proxy; Alloy is not a metrics intermediary",
+    "Docker API access uses the read-only method/path proxy on the isolated cadvisor-docker-api network at 2375",
+    "container labels are allowlisted; no container lifecycle mutation permissions"
   ],
   "identity": {
     "authority": "appolon1908-hue/Keycloak",
