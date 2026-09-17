@@ -69,3 +69,7 @@ labels, mTLS scrape success, and rollback.
 Promotion is `feature/* -> development -> test -> staging -> production -> main`. Merging changes source authority only and does not deploy. `DEPLOYMENT_ENABLED=NO` remains binding until the 14-repository release manifest is accepted.
 
 Automated upstream synchronization requires the repository Actions secret `CODESTRA_AUTOMATION_TOKEN`, backed by an approved GitHub App or fine-grained token with contents and pull-request permissions. The non-default token is required so generated review PRs trigger normal validation; absence of the secret fails the sync closed.
+
+## Monitoring platform contract
+
+`codestra/monitoring-platform.v1.json` declares this exporter's place in the three-plane model: telemetry data plane, Middleware as the operational controller (service catalog, monitoring state, incidents), OpenBao as the only secrets authority. `scripts/validate_monitoring_platform.py` fails closed on a published or non-loopback host port, an inline credential, a credential file without an OpenBao secret reference, a business effect, or (Blackbox) any probe module that is not read-only.
