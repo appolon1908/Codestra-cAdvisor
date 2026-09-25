@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "repository": "appolon1908-hue/Codestra-cAdvisor",
+  "service": "cadvisor",
+  "plane": "telemetry-data-plane",
+  "controller": "appolon1908-hue/Middleware- (service catalog, monitoring state, incidents)",
+  "secretsAuthority": "appolon1908-hue/Codestra-OpenBao",
+  "credentialPolicy": {
+    "credentialFree": true,
+    "openbaoWorkloadIdentity": null,
+    "openbaoPathPrefix": null,
+    "secretReferences": null,
+    "secretMaterialInGit": false,
+    "credentialsFromRuntimeFilesOnly": false
+  },
+  "listener": {
+    "address": "0.0.0.0:8080",
+    "exposure": "private_observability_network_only",
+    "hostPortPublished": false,
+    "internetIngress": false
+  },
+  "prometheus": {
+    "scrapeJob": "codestra-targets",
+    "targetId": "cadvisor",
+    "consumerRepository": "appolon1908-hue/Codestra-Prometheus",
+    "metricsOnly": true
+  },
+  "middlewareCatalog": {
+    "serviceId": "cadvisor",
+    "metricsProfile": "prometheus",
+    "logsProfile": "alloy",
+    "tracesProfile": "not-applicable",
+    "expectedStateSource": "release image digest and config bundle digest"
+  },
+  "businessEffects": {
+    "providerWrites": false,
+    "businessApiCalls": false
+  },
+  "runtimeApplyAuthorized": false
+}
