@@ -1,77 +1,160 @@
 name: Codestra Upstream Source Sync
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - CODESTRA_UPSTREAM.json
       - .github/workflows/upstream-source-sync.yml
+  workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: codestra-upstream-source-sync
+  cancel-in-progress: false
 
 jobs:
   sync:
+    if: github.actor != 'github-actions[bot]' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out Codestra authority
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Import official upstream source
+          persist-credentials: true
+
+      - name: Import exact official upstream source
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           mapfile -t values < <(python3 - <<'PY'
           import json
           from pathlib import Path
-          data=json.loads(Path('CODESTRA_UPSTREAM.json').read_text())
-          print(data['upstream_clone_url']); print(data['upstream_ref']); print(data['import_path'])
+          data = json.loads(Path('CODESTRA_UPSTREAM.json').read_text())
+          print(data['upstream_clone_url'])
+          print(data['upstream_ref'])
+          print(data['import_path'])
           PY
           )
-          UPSTREAM_URL="${values[0]}"; UPSTREAM_REF="${values[1]}"; IMPORT_PATH="${values[2]}"
-          [[ "$UPSTREAM_URL" == "https://github.com/google/cadvisor.git" ]]
-          [[ "$UPSTREAM_REF" == "master" ]]
-          [[ "$IMPORT_PATH" == "upstream" ]]
+          UPSTREAM_URL="${values[0]}"
+          UPSTREAM_REF="${values[1]}"
+          IMPORT_PATH="${values[2]}"
+          [[ "$UPSTREAM_URL" == 'https://github.com/google/cadvisor.git' ]]
+          [[ "$UPSTREAM_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMPORT_PATH" == upstream ]]
+
           rm -rf .codestra-upstream-src "$IMPORT_PATH"
-          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --branch "$UPSTREAM_REF" "$UPSTREAM_URL" .codestra-upstream-src
+          git init --quiet .codestra-upstream-src
+          git -C .codestra-upstream-src remote add origin "$UPSTREAM_URL"
+          GIT_LFS_SKIP_SMUDGE=1 git -C .codestra-upstream-src fetch --depth 1 --no-tags origin "$UPSTREAM_REF"
+          git -C .codestra-upstream-src checkout --quiet --detach FETCH_HEAD
           UPSTREAM_SHA="$(git -C .codestra-upstream-src rev-parse HEAD)"
+          [[ "$UPSTREAM_SHA" == "$UPSTREAM_REF" ]]
+          UPSTREAM_TIMESTAMP="$(git -C .codestra-upstream-src show -s --format=%cI "$UPSTREAM_SHA")"
           rm -rf .codestra-upstream-src/.git
           mv .codestra-upstream-src "$IMPORT_PATH"
-          export UPSTREAM_URL UPSTREAM_REF UPSTREAM_SHA
+
+          export UPSTREAM_URL UPSTREAM_REF UPSTREAM_SHA UPSTREAM_TIMESTAMP
           python3 - <<'PY'
-          import json, os, re
-          from datetime import datetime, timezone
+          import json
+          import os
           from pathlib import Path
 
-          sanitizations=[]
-          fixture=Path('upstream/perf/io/data')
-          if fixture.exists():
-              text=fixture.read_text(errors='surrogateescape')
-              original=text
-              patterns=[
-                  (r'ya29\.[A-Za-z0-9._~+/-]+', 'GOOGLE_OAUTH_TEST_TOKEN_INVALID'),
-                  (r'(?i)("access_token"\s*:\s*")[^"]+(\")', r'\1GOOGLE_OAUTH_TEST_TOKEN_INVALID\2'),
-                  (r'(?i)(access_token=)[A-Za-z0-9._~+/=-]+', r'\1GOOGLE_OAUTH_TEST_TOKEN_INVALID'),
-                  (r'(?<![A-Za-z0-9])1/[A-Za-z0-9._~-]{20,}', 'GOOGLE_OAUTH_TEST_TOKEN_INVALID'),
-              ]
-              replacements=0
-              for pattern,repl in patterns:
-                  text,n=re.subn(pattern,repl,text)
-                  replacements += n
-              if text != original:
-                  fixture.write_text(text, errors='surrogateescape')
-                  sanitizations.append({'rule':'replace Google OAuth2-like values in upstream perf fixture with explicit invalid test placeholders','files_changed':1,'replacements':replacements})
-
-          lock={'schema_version':'1.0','upstream_clone_url':os.environ['UPSTREAM_URL'],'upstream_ref':os.environ['UPSTREAM_REF'],'upstream_commit':os.environ['UPSTREAM_SHA'],'import_path':'upstream','synchronized_at':datetime.now(timezone.utc).isoformat(),'deployment_enabled':False,'secret_material_allowed_in_git':False}
-          if sanitizations:
-              lock['sanitizations']=sanitizations
-          Path('CODESTRA_UPSTREAM_LOCK.json').write_text(json.dumps(lock,indent=2)+'\n')
+          Path('CODESTRA_UPSTREAM_LOCK.json').write_text(json.dumps({
+              'schema_version': '1.0',
+              'upstream_clone_url': os.environ['UPSTREAM_URL'],
+              'upstream_ref': os.environ['UPSTREAM_REF'],
+              'upstream_commit': os.environ['UPSTREAM_SHA'],
+              'import_path': 'upstream',
+              'synchronized_at': os.environ['UPSTREAM_TIMESTAMP'],
+              'deployment_enabled': False,
+              'secret_material_allowed_in_git': False,
+          }, indent=2) + '\n')
           PY
+
           git config user.name 'codestra-upstream-sync'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add -A upstream CODESTRA_UPSTREAM_LOCK.json
-          git diff --cached --quiet && exit 0
-          git commit -m "vendor: sync official cAdvisor upstream ${UPSTREAM_SHA}"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          export GIT_AUTHOR_DATE="$UPSTREAM_TIMESTAMP"
+          export GIT_COMMITTER_DATE="$UPSTREAM_TIMESTAMP"
+          readonly SYNC_BRANCH="sync/cadvisor-upstream-${UPSTREAM_SHA}-${GITHUB_SHA}"
+          git switch --create "$SYNC_BRANCH"
+          git fetch --depth 1 --no-tags "$UPSTREAM_URL" "$UPSTREAM_SHA"
+          git rm -r --cached --quiet --ignore-unmatch upstream
+          git read-tree --prefix=upstream/ "${UPSTREAM_SHA}^{tree}"
+          git add CODESTRA_UPSTREAM_LOCK.json
+          if git diff --cached --quiet; then
+            echo 'Exact upstream snapshot already current.'
+            exit 0
+          fi
+          git commit -m "vendor(cadvisor): Sync official upstream ${UPSTREAM_SHA}"
+
+          LOCAL_SHA="$(git rev-parse HEAD)"
+          REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/${SYNC_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$REMOTE_SHA" ]]; then
+            git fetch --no-tags origin \
+              "refs/heads/${SYNC_BRANCH}:refs/remotes/origin/${SYNC_BRANCH}"
+            remote_ref="refs/remotes/origin/${SYNC_BRANCH}"
+            [[ "$(git rev-parse "$remote_ref")" == "$REMOTE_SHA" ]]
+            [[ "$(git rev-parse "${remote_ref}:upstream")" == \
+              "$(git rev-parse 'HEAD:upstream')" ]]
+            [[ "$(git rev-parse "${remote_ref}:CODESTRA_UPSTREAM_LOCK.json")" == \
+              "$(git rev-parse 'HEAD:CODESTRA_UPSTREAM_LOCK.json')" ]]
+            mapfile -t remote_parents < <(git show -s --format=%P "$remote_ref")
+            read -r -a remote_parent_values <<< "${remote_parents[0]}"
+            (( ${#remote_parent_values[@]} == 1 ))
+            [[ "${remote_parent_values[0]}" == "$GITHUB_SHA" ]]
+            mapfile -t remote_changes < <(
+              git diff --name-only "${remote_parent_values[0]}" "$remote_ref"
+            )
+            (( ${#remote_changes[@]} >= 1 ))
+            lock_changed=0
+            for changed_path in "${remote_changes[@]}"; do
+              [[ "$changed_path" == CODESTRA_UPSTREAM_LOCK.json || \
+                "$changed_path" == upstream/* ]]
+              if [[ "$changed_path" == CODESTRA_UPSTREAM_LOCK.json ]]; then
+                lock_changed=1
+              fi
+            done
+            (( lock_changed == 1 ))
+            LOCAL_SHA="$REMOTE_SHA"
+          else
+            git push origin "HEAD:refs/heads/${SYNC_BRANCH}"
+          fi
+
+          mapfile -t OPEN_PRS < <(
+            gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" \
+              -f state=open \
+              -f base="main" \
+              -f head="${GITHUB_REPOSITORY_OWNER}:${SYNC_BRANCH}" \
+              -f per_page=100 \
+              --paginate \
+              --jq '.[] | [.number,.base.ref,.head.ref,.head.sha,.head.repo.full_name] | @tsv'
+          )
+          if (( ${#OPEN_PRS[@]} == 1 )); then
+            IFS=$'\t' read -r pr_number pr_base pr_head pr_head_sha pr_repository extra <<< "${OPEN_PRS[0]}"
+            [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]
+            [[ "$pr_base" == "main" ]]
+            [[ "$pr_head" == "$SYNC_BRANCH" ]]
+            [[ "$pr_head_sha" == "$LOCAL_SHA" ]]
+            [[ "$pr_repository" == "$GITHUB_REPOSITORY" ]]
+            [[ -z "${extra:-}" ]]
+          elif (( ${#OPEN_PRS[@]} > 1 )); then
+            echo 'Multiple open synchronization pull requests found.' >&2
+            exit 3
+          elif (( ${#OPEN_PRS[@]} == 0 )); then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$SYNC_BRANCH" \
+              --title "vendor(cadvisor): Sync reviewed official upstream ${UPSTREAM_SHA}" \
+              --body "Pins and imports exact official cAdvisor commit ${UPSTREAM_SHA}. Deployment remains disabled. Normal source validation and independent review are required."
+          fi
+          gh workflow run validate.yml --repo "$GITHUB_REPOSITORY" --ref "$SYNC_BRANCH"
