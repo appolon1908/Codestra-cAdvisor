@@ -1,6 +1,6 @@
 # Codestra cAdvisor Authority
 
-Principal repository: `appolon1908-hue/Codestra-cAdvisor`
+Principal repository: `ingtrader21-spec/Codestra-cAdvisor`
 Canonical service host: `cadv.codestra.media`
 Canonical DNS target: `37.27.128.39`
 TTL: `600`
