@@ -1,0 +1,12 @@
+version: 1
+repository: Codestra-cAdvisor
+repository_url: https://github.com/ingtrader21-spec/Codestra-cAdvisor.git
+canonical_path: /home/codestra/Worktrees/Monitoring-Active-20260926/Codestra-cAdvisor
+active_worktree: /home/codestra/Worktrees/Monitoring-Active-20260926/Codestra-cAdvisor
+active_branch: governance/single-active-lane-20260926
+base_branch: main
+base_sha: a8338a2adf112bfbcdc53e8b187e309b6a5920bd
+upstream_ref: origin/main
+publication_branch: governance/single-active-lane-20260926
+production_effects_allowed: false
+certification_mode: isolated_exact_sha
