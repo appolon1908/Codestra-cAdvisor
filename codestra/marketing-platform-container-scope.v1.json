@@ -1,0 +1,10 @@
+{
+  "schemaVersion":"1.0",
+  "status":"CONTAINER_SCOPE_PREPARED_NOT_DEPLOYED",
+  "domain":"codestra-marketing-platform",
+  "requiredMetrics":["container_cpu_usage_seconds_total","container_memory_working_set_bytes","container_network_receive_bytes_total","container_network_transmit_bytes_total","container_fs_usage_bytes","container_last_seen","container_start_time_seconds"],
+  "restartCorrelation":"derive restart/change signals from container_start_time_seconds and container_last_seen; no container_restarts series is assumed",
+  "labels":["environment","service","deployment","server"],
+  "forbiddenLabels":["tenant_id","customer_id","user_id","email","phone"],
+  "activation":{"runtimeApplied":false,"productionEnabled":false}
+}

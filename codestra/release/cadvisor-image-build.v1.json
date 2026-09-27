@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "imageId": "cadvisor",
+  "dockerfile": "codestra/deploy/Dockerfile.cadvisor",
+  "context": ".",
+  "buildArgs": {
+    "CADVISOR_BASE_IMAGE": "ghcr.io/google/cadvisor@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe",
+    "GO_BUILDER_IMAGE": "docker.io/library/golang@sha256:98e6cffc31ccc44c7c15d83df1d69891efee8115a5bb7ede2bf30a38af3e3c92"
+  },
+  "license": "Apache-2.0",
+  "description": "Private cAdvisor built from the locked vendored source with protocol-level readiness and no direct Docker socket.",
+  "productionActivation": false
+}

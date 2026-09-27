@@ -1,0 +1,39 @@
+name: Release signed cAdvisor images
+
+on:
+  workflow_dispatch:
+    inputs:
+      cadvisor_release_tag:
+        description: Immutable label codestra-cadvisor-vX.Y.Z
+        required: true
+        type: string
+      proxy_release_tag:
+        description: Immutable label codestra-cadvisor-proxy-vX.Y.Z
+        required: true
+        type: string
+      protected_source_sha:
+        description: Exact protected production commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-cadvisor:
+    uses: appolon1908-hue/Codestra-Telemetry/.github/workflows/reusable-release-image.yml@9a6aebb849bbc068105c10d9d1dfd39ebf6f78bd
+    with:
+      image_id: cadvisor
+      release_tag: ${{ inputs.cadvisor_release_tag }}
+      protected_source_sha: ${{ inputs.protected_source_sha }}
+      build_manifest_path: codestra/release/cadvisor-image-build.v1.json
+  release-proxy:
+    uses: appolon1908-hue/Codestra-Telemetry/.github/workflows/reusable-release-image.yml@9a6aebb849bbc068105c10d9d1dfd39ebf6f78bd
+    with:
+      image_id: cadvisor-proxy
+      release_tag: ${{ inputs.proxy_release_tag }}
+      protected_source_sha: ${{ inputs.protected_source_sha }}
+      build_manifest_path: codestra/release/proxy-image-build.v1.json

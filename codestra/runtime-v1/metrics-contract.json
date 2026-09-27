@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1.0",
+  "source": "cadvisor",
+  "endpoint": "http://cadvisor:8080/metrics",
+  "exposure": "private_observability_network_only",
+  "approvedContainerLabels": {
+    "container_label_com_codestra_business": "codestra_business",
+    "container_label_com_codestra_application": "application",
+    "container_label_com_codestra_service": "service",
+    "container_label_com_codestra_environment": "environment",
+    "container_label_com_codestra_deployment": "deployment",
+    "container_label_com_codestra_owner": "owner"
+  },
+  "requiredTargetLabels": [
+    "codestra_business",
+    "application",
+    "service",
+    "environment",
+    "server",
+    "region",
+    "deployment"
+  ],
+  "forbiddenContainerLabels": [
+    "tenant_id",
+    "customer_id",
+    "email",
+    "phone",
+    "request_id",
+    "trace_id",
+    "session_id",
+    "order_id",
+    "message_id",
+    "credential",
+    "token"
+  ],
+  "corporateMetrics": [
+    "container_cpu_usage_seconds_total",
+    "container_cpu_cfs_throttled_seconds_total",
+    "container_memory_working_set_bytes",
+    "container_memory_failcnt",
+    "container_oom_events_total",
+    "container_fs_reads_bytes_total",
+    "container_fs_writes_bytes_total",
+    "container_network_receive_bytes_total",
+    "container_network_transmit_bytes_total",
+    "container_last_seen"
+  ],
+  "rules": {
+    "containerIdAsDashboardLabel": false,
+    "imageDigestAsBusinessRollupLabel": false,
+    "rawDockerLabelsExported": false,
+    "processMetricsEnabled": false,
+    "tcpConnectionMetricsEnabled": false,
+    "udpConnectionMetricsEnabled": false,
+    "privilegedModeRequiresApprovedHostException": true
+  }
+}

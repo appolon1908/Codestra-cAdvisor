@@ -1,0 +1,53 @@
+name: Validate cAdvisor repository readiness
+on: [pull_request]
+permissions: {contents: read}
+jobs:
+  validate-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with: {ref: "${{ github.event.pull_request.head.sha }}", fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with: {python-version: "3.12"}
+      - env: {HEAD_SHA: "${{ github.event.pull_request.head.sha }}", BASE_SHA: "${{ github.event.pull_request.base.sha }}"}
+        run: |
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          python3 -m pip install --disable-pip-version-check --no-cache-dir -r requirements-validation.txt
+          python3 scripts/validate_codestra_cadvisor_corporate.py
+          python3 scripts/validate_repository_readiness.py
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          git diff --check "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)upstream/**'
+      - name: Scan changed source with redacted output
+        env: {HEAD_SHA: "${{ github.event.pull_request.head.sha }}", BASE_SHA: "${{ github.event.pull_request.base.sha }}"}
+        run: |
+          archive="${RUNNER_TEMP}/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz --output "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact=100 --exit-code 1 --log-opts="${BASE_SHA}..${HEAD_SHA}" .
+      - name: Build and verify both locked images
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          builder="$(jq -r '.builderImage' codestra/release/runtime-base.lock.json)"
+          cadvisor_base="$(jq -r '.cadvisorBaseImage' codestra/release/runtime-base.lock.json)"
+          proxy_base="$(jq -r '.proxyRuntimeImage' codestra/release/runtime-base.lock.json)"
+          docker build --file codestra/deploy/Dockerfile.cadvisor --build-arg "GO_BUILDER_IMAGE=$builder" --build-arg "CADVISOR_BASE_IMAGE=$cadvisor_base" --tag "local/codestra-cadvisor:$HEAD_SHA" .
+          docker build --file codestra/deploy/Dockerfile.proxy --build-arg "GO_BUILDER_IMAGE=$builder" --build-arg "PROXY_RUNTIME_IMAGE=$proxy_base" --tag "local/codestra-cadvisor-proxy:$HEAD_SHA" codestra
+          output="$(docker run --rm "local/codestra-cadvisor:$HEAD_SHA" --version 2>&1)"
+          grep -F 'cAdvisor version v0.60.5-codestra.1 (6a0c4f2)' <<<"$output"
+          docker image inspect "local/codestra-cadvisor-proxy:$HEAD_SHA" --format '{{json .Config.Entrypoint}}' | grep -F '/codestra-cadvisor-proxy'
+  validate-merge-result:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with: {python-version: "3.12"}
+      - run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m pip install --disable-pip-version-check --no-cache-dir -r requirements-validation.txt
+          python3 scripts/validate_codestra_cadvisor_corporate.py
+          python3 scripts/validate_repository_readiness.py
+          python3 -m unittest discover -s tests -p 'test_*.py'

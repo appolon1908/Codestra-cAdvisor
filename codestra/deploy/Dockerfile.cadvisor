@@ -1,0 +1,33 @@
+# syntax=docker.io/docker/dockerfile@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+ARG GO_BUILDER_IMAGE
+ARG CADVISOR_BASE_IMAGE
+
+FROM ${GO_BUILDER_IMAGE} AS source-builder
+WORKDIR /src
+COPY upstream/ ./
+WORKDIR /src/cmd
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -trimpath \
+      -tags=netgo \
+      -ldflags='-s -w -buildid= -X github.com/google/cadvisor/lib/version.Version=v0.60.5-codestra.1 -X github.com/google/cadvisor/lib/version.Revision=6a0c4f2 -X github.com/google/cadvisor/lib/version.Branch=codestra-vendored' \
+      -o /out/cadvisor \
+      .
+
+WORKDIR /healthcheck
+COPY codestra/deploy/healthcheck.go ./healthcheck.go
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -trimpath \
+      -ldflags='-s -w -buildid=' \
+      -o /out/codestra-healthcheck \
+      ./healthcheck.go
+
+FROM ${CADVISOR_BASE_IMAGE}
+LABEL org.opencontainers.image.title="Codestra Corporate cAdvisor"
+LABEL org.opencontainers.image.description="Private container resource metrics with governed labels and no direct Docker socket"
+LABEL org.opencontainers.image.vendor="Codestra"
+
+COPY --from=source-builder --chown=0:0 --chmod=0555 /out/cadvisor /usr/bin/cadvisor
+COPY --from=source-builder --chown=0:0 --chmod=0555 /out/codestra-healthcheck /codestra-healthcheck
+
+USER 0:0

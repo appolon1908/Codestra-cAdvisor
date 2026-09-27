@@ -1,0 +1,326 @@
+name: Validate Codestra cAdvisor corporate configuration
+
+on:
+  pull_request:
+    paths:
+      - 'codestra/**'
+      - 'scripts/validate_codestra_cadvisor.py'
+      - 'scripts/validate_codestra_cadvisor_corporate.py'
+      - '.github/workflows/validate-codestra-cadvisor.yml'
+      - 'upstream/go.mod'
+      - 'upstream/go.sum'
+      - 'upstream/**'
+  push:
+    branches: [development, test, staging, production, main]
+    paths:
+      - 'codestra/**'
+      - 'scripts/validate_codestra_cadvisor.py'
+      - 'scripts/validate_codestra_cadvisor_corporate.py'
+      - '.github/workflows/validate-codestra-cadvisor.yml'
+      - 'upstream/go.mod'
+      - 'upstream/go.sum'
+      - 'upstream/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codestra-cadvisor-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out exact head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+
+      - name: Install pinned policy-validator dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir PyYAML==6.0.3
+
+      - name: Validate topology, Docker boundary, labels, relabeling, packaging, and runtime policy
+        env:
+          PYTHONPYCACHEPREFIX: /tmp/codestra-cadvisor-pycache
+        run: |
+          python -m py_compile scripts/validate_codestra_cadvisor.py scripts/validate_codestra_cadvisor_corporate.py
+          python scripts/validate_codestra_cadvisor_corporate.py
+
+      - name: Render hardened three-service Compose candidate
+        env:
+          GO_BUILDER_IMAGE: golang:9.9@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          PROXY_RUNTIME_IMAGE: gcr.io/distroless/static-debian12:nonroot@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          CADVISOR_BASE_IMAGE: gcr.io/cadvisor/cadvisor:99.0.0@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          CODESTRA_CADVISOR_PROXY_IMAGE: ghcr.io/appolon1908-hue/codestra-cadvisor-proxy:ci@sha256:3333333333333333333333333333333333333333333333333333333333333333
+          CODESTRA_CADVISOR_IMAGE: ghcr.io/appolon1908-hue/codestra-cadvisor:ci@sha256:4444444444444444444444444444444444444444444444444444444444444444
+          DOCKER_SOCKET_GID: '999'
+          CODESTRA_ENVIRONMENT: test
+          CODESTRA_REGION: ci
+          CODESTRA_SERVER: github-actions
+          CODESTRA_CADVISOR_DEPLOYMENT_ID: exact-head-ci
+          CADVISOR_DOCKER_ROOT_PATH: /tmp/codestra-cadvisor/docker-root
+          CADVISOR_DEVICE_METADATA_PATH: /tmp/codestra-cadvisor/dev-disk
+          CODESTRA_OBSERVABILITY_NETWORK: codestra-observability
+        run: |
+          python scripts/validate_runtime_images.py
+          docker compose -f codestra/deploy/compose.candidate.yaml config > /tmp/codestra-cadvisor-compose.yaml
+          test -s /tmp/codestra-cadvisor-compose.yaml
+          ! grep -Eq 'published:|host_ip:|:latest([[:space:]]|$)|privileged: true|network_mode: host|pid: host|/dev/kmsg' /tmp/codestra-cadvisor-compose.yaml
+          test "$(grep -c '/var/run/docker.sock' /tmp/codestra-cadvisor-compose.yaml)" -ge 2
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          from scripts.validate_runtime_images import valid_image
+
+          compose = yaml.safe_load(Path('/tmp/codestra-cadvisor-compose.yaml').read_text())
+          for name, service in compose['services'].items():
+              assert valid_image(service['image']), f'mutable service image: {name}'
+              for key, value in service.get('build', {}).get('args', {}).items():
+                  assert valid_image(value), f'mutable build image: {name}/{key}'
+          PY
+
+      - name: Set up Go from locked cAdvisor source
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: upstream/go.mod
+          cache-dependency-path: upstream/go.sum
+
+      - name: Format, vet, unit-test, and compile security proxies
+        run: |
+          gofmt -w codestra/deploy/proxy.go codestra/deploy/proxy_test.go codestra/deploy/healthcheck.go codestra/deploy/healthcheck_test.go
+          git diff --exit-code -- codestra/deploy/proxy.go codestra/deploy/proxy_test.go codestra/deploy/healthcheck.go codestra/deploy/healthcheck_test.go
+          go test codestra/deploy/proxy.go codestra/deploy/proxy_test.go
+          go test codestra/deploy/healthcheck.go codestra/deploy/healthcheck_test.go
+          go vet codestra/deploy/proxy.go
+          go vet codestra/deploy/healthcheck.go
+          CGO_ENABLED=0 go build -trimpath -o /tmp/codestra-cadvisor-proxy codestra/deploy/proxy.go
+          CGO_ENABLED=0 go build -trimpath -o /tmp/codestra-healthcheck codestra/deploy/healthcheck.go
+
+      - name: Build cAdvisor from locked source
+        working-directory: upstream/cmd
+        run: go build -trimpath -o ../../.bin/cadvisor .
+
+      - name: Prove every configured cAdvisor flag exists in locked source
+        run: |
+          .bin/cadvisor --help > /tmp/cadvisor-help 2>&1 || true
+          test -s /tmp/cadvisor-help
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import yaml
+
+          command = yaml.safe_load(
+              Path('codestra/deploy/compose.candidate.yaml').read_text(encoding='utf-8')
+          )['services']['cadvisor']['command']
+          help_text = Path('/tmp/cadvisor-help').read_text(encoding='utf-8', errors='replace')
+          missing = []
+          for argument in command:
+              name = str(argument).split('=', 1)[0].lstrip('-')
+              pattern = rf'(?m)^\s*-{{1,2}}{re.escape(name)}(?:\s|=|$)'
+              if not re.search(pattern, help_text):
+                  missing.append(name)
+          if missing:
+              raise SystemExit(f'configured cAdvisor flags missing from locked source: {sorted(set(missing))}')
+          PY
+          .bin/cadvisor --version
+
+      - name: Generate temporary metrics-proxy mTLS chain
+        run: |
+          mkdir -p /tmp/cadvisor-pki
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
+            -keyout /tmp/cadvisor-pki/ca.key \
+            -out /tmp/cadvisor-pki/ca.crt \
+            -subj '/CN=Codestra cAdvisor CI CA' -days 1
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout /tmp/cadvisor-pki/server.key \
+            -out /tmp/cadvisor-pki/server.csr \
+            -subj '/CN=127.0.0.1'
+          printf 'subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' >/tmp/cadvisor-pki/server.ext
+          openssl x509 -req -sha256 \
+            -in /tmp/cadvisor-pki/server.csr \
+            -CA /tmp/cadvisor-pki/ca.crt \
+            -CAkey /tmp/cadvisor-pki/ca.key \
+            -CAcreateserial \
+            -out /tmp/cadvisor-pki/server.crt \
+            -days 1 -extfile /tmp/cadvisor-pki/server.ext
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout /tmp/cadvisor-pki/client.key \
+            -out /tmp/cadvisor-pki/client.csr \
+            -subj '/CN=prometheus-ci'
+          printf 'extendedKeyUsage=clientAuth\n' >/tmp/cadvisor-pki/client.ext
+          openssl x509 -req -sha256 \
+            -in /tmp/cadvisor-pki/client.csr \
+            -CA /tmp/cadvisor-pki/ca.crt \
+            -CAkey /tmp/cadvisor-pki/ca.key \
+            -CAcreateserial \
+            -out /tmp/cadvisor-pki/client.crt \
+            -days 1 -extfile /tmp/cadvisor-pki/client.ext
+
+      - name: Prove metrics proxy mTLS and path/method boundaries
+        run: |
+          cat >/tmp/fake-cadvisor.py <<'PY'
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if self.path == '/metrics':
+                      body = b'cadvisor_version_info{version="ci"} 1\n'
+                      self.send_response(200)
+                      self.send_header('Content-Type', 'text/plain; version=0.0.4')
+                      self.send_header('Content-Length', str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+                      return
+                  if self.path == '/healthz':
+                      body = b'ok\n'
+                      self.send_response(200)
+                      self.send_header('Content-Length', str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+                      return
+                  self.send_error(404)
+              def log_message(self, *args):
+                  return
+
+          ThreadingHTTPServer(('127.0.0.1', 18080), Handler).serve_forever()
+          PY
+          python /tmp/fake-cadvisor.py >/tmp/fake-cadvisor.log 2>&1 &
+          UPSTREAM_PID=$!
+          CODESTRA_PROXY_MODE=metrics-mtls \
+          PROXY_LISTEN_ADDRESS=127.0.0.1:19443 \
+          METRICS_UPSTREAM_URL=http://127.0.0.1:18080 \
+          TLS_CERT_FILE=/tmp/cadvisor-pki/server.crt \
+          TLS_KEY_FILE=/tmp/cadvisor-pki/server.key \
+          TLS_CLIENT_CA_FILE=/tmp/cadvisor-pki/ca.crt \
+          /tmp/codestra-cadvisor-proxy >/tmp/cadvisor-metrics-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill ${PROXY_PID} ${UPSTREAM_PID} 2>/dev/null || true; cat /tmp/cadvisor-metrics-proxy.log' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --http1.1 \
+              --cacert /tmp/cadvisor-pki/ca.crt \
+              --cert /tmp/cadvisor-pki/client.crt \
+              --key /tmp/cadvisor-pki/client.key \
+              https://127.0.0.1:19443/metrics >/tmp/cadvisor-proxy-metrics; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '^cadvisor_version_info' /tmp/cadvisor-proxy-metrics
+          curl --fail --silent --show-error --http1.1 \
+            --cacert /tmp/cadvisor-pki/ca.crt \
+            --cert /tmp/cadvisor-pki/client.crt \
+            --key /tmp/cadvisor-pki/client.key \
+            https://127.0.0.1:19443/healthz >/dev/null
+          if curl --fail --silent --show-error --http1.1 --cacert /tmp/cadvisor-pki/ca.crt https://127.0.0.1:19443/metrics >/dev/null 2>&1; then
+            echo 'ERROR: metrics proxy accepted no-certificate request' >&2
+            exit 1
+          fi
+          if curl --fail --silent --show-error http://127.0.0.1:19443/metrics >/dev/null 2>&1; then
+            echo 'ERROR: metrics proxy accepted plaintext request' >&2
+            exit 1
+          fi
+          if curl --fail --silent --show-error --http1.1 \
+            --cacert /tmp/cadvisor-pki/ca.crt --cert /tmp/cadvisor-pki/client.crt --key /tmp/cadvisor-pki/client.key \
+            https://127.0.0.1:19443/debug >/dev/null 2>&1; then
+            echo 'ERROR: metrics proxy accepted unapproved path' >&2
+            exit 1
+          fi
+          if curl --fail --silent --show-error --http1.1 \
+            --cacert /tmp/cadvisor-pki/ca.crt --cert /tmp/cadvisor-pki/client.crt --key /tmp/cadvisor-pki/client.key \
+            'https://127.0.0.1:19443/metrics?debug=1' >/dev/null 2>&1; then
+            echo 'ERROR: metrics proxy accepted query string' >&2
+            exit 1
+          fi
+          if curl --fail --silent --show-error --http1.1 -X POST \
+            --cacert /tmp/cadvisor-pki/ca.crt --cert /tmp/cadvisor-pki/client.crt --key /tmp/cadvisor-pki/client.key \
+            https://127.0.0.1:19443/metrics >/dev/null 2>&1; then
+            echo 'ERROR: metrics proxy accepted write method' >&2
+            exit 1
+          fi
+          kill "${PROXY_PID}" "${UPSTREAM_PID}"
+          wait "${PROXY_PID}" || true
+          wait "${UPSTREAM_PID}" || true
+          trap - EXIT
+
+      - name: Prove Docker proxy forwards reads and denies mutations
+        run: |
+          cat >/tmp/fake-docker.py <<'PY'
+          import os
+          import socketserver
+          from http.server import BaseHTTPRequestHandler
+
+          path = '/tmp/codestra-docker-ci.sock'
+          try:
+              os.unlink(path)
+          except FileNotFoundError:
+              pass
+
+          class Handler(BaseHTTPRequestHandler):
+              def address_string(self):
+                  return 'local'
+              def do_GET(self):
+                  body = b'OK' if self.path.endswith('/_ping') else b'{}'
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.send_header('Content-Length', str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def do_HEAD(self):
+                  self.send_response(200)
+                  self.end_headers()
+              def log_message(self, *args):
+                  return
+
+          class Server(socketserver.ThreadingUnixStreamServer):
+              daemon_threads = True
+
+          Server(path, Handler).serve_forever()
+          PY
+          python /tmp/fake-docker.py >/tmp/fake-docker.log 2>&1 &
+          DOCKER_PID=$!
+          for attempt in $(seq 1 30); do
+            test -S /tmp/codestra-docker-ci.sock && break
+            sleep 1
+          done
+          CODESTRA_PROXY_MODE=docker-api \
+          PROXY_LISTEN_ADDRESS=127.0.0.1:12375 \
+          DOCKER_SOCKET_PATH=/tmp/codestra-docker-ci.sock \
+          /tmp/codestra-cadvisor-proxy >/tmp/cadvisor-docker-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill ${PROXY_PID} ${DOCKER_PID} 2>/dev/null || true; cat /tmp/cadvisor-docker-proxy.log' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:12375/info >/tmp/docker-info; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(cat /tmp/docker-info)" = '{}'
+          curl --fail --silent --show-error 'http://127.0.0.1:12375/containers/json?all=1' >/dev/null
+          if curl --fail --silent --show-error -X POST http://127.0.0.1:12375/containers/create >/dev/null 2>&1; then
+            echo 'ERROR: Docker proxy accepted container create' >&2
+            exit 1
+          fi
+          if curl --fail --silent --show-error http://127.0.0.1:12375/volumes >/dev/null 2>&1; then
+            echo 'ERROR: Docker proxy accepted unapproved resource' >&2
+            exit 1
+          fi
+          kill "${PROXY_PID}" "${DOCKER_PID}"
+          wait "${PROXY_PID}" || true
+          wait "${DOCKER_PID}" || true
+          trap - EXIT
+
+      - name: Confirm source-only safety state
+        run: |
+          test "$(python -c 'import json; print(json.load(open("codestra/runtime.v1.json"))["status"])')" = "CONFIG_PREPARED_NOT_DEPLOYED"
+          test "$(python -c 'import json; print(json.load(open("codestra/container-label-contract.v1.json"))["status"])')" = "CONTRACT_PREPARED_NOT_ENFORCED"
+          python - <<'PY'
+          import json
+          runtime = json.load(open('codestra/runtime.v1.json', encoding='utf-8'))
+          assert runtime['activation']
+          assert all(value is False for value in runtime['activation'].values())
+          PY

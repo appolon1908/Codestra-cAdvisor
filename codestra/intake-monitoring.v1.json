@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "status": "CONTRACT_PREPARED_NOT_DEPLOYED",
+  "domain": "unified-intake",
+  "canonicalFlow": ["website-or-widget", "@codestra/intake-form-or-intake-survey", "@codestra/intake-sdk", "same-origin-intake-bff", "caddy", "kong", "middleware-durable-intake", "odoo-or-analytics-or-approved-workflow"],
+  "events": ["codestra.events.lead_submitted", "codestra.events.survey_response_submitted"],
+  "safeDimensions": ["codestra_business", "application", "service", "environment", "region", "deployment", "replica"],
+  "forbiddenLabelsOrPayloads": ["tenant_id", "site_id", "campaign_id", "form_id", "survey_id", "question_id", "customer_id", "contact_id", "lead_id", "response_id", "account_id", "user_id", "email", "phone", "message", "transcript", "answers", "custom_fields", "consent_text", "request_id", "trace_id", "container_id", "image_id"],
+  "privacyRules": {"rawFormAnswersInTelemetry": false, "rawSurveyAnswersInTelemetry": false, "formOrSurveyIdentifiersAsLabels": false},
+  "activation": {"runtimeApplied": false, "productionTargetsEnabled": false, "liveBusinessWritesEnabledByThisContract": false},
+  "component": "cadvisor",
+  "responsibility": "container saturation and lifecycle evidence for intake services",
+  "features": {
+    "resourceSignals": ["cpu", "memory", "filesystem", "network", "oom", "throttling"],
+    "approvedApplicationLabels": ["codestra_business", "application", "service", "environment", "region", "deployment", "replica"],
+    "formOrSurveyIdentifiersAsLabels": false
+  }
+}

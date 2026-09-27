@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "status": "CONTRACT_PREPARED_NOT_ENFORCED",
+  "businessScope": [
+    "platform",
+    "codestra",
+    "moneybee",
+    "beyvra",
+    "breero",
+    "larim-a",
+    "transportation",
+    "booked4seasons",
+    "social",
+    "klyrow",
+    "telnexa",
+    "kyqra",
+    "restaurant",
+    "provisioning"
+  ],
+  "requiredDockerLabels": [
+    "codestra.business",
+    "codestra.application",
+    "codestra.service",
+    "codestra.environment",
+    "codestra.region",
+    "codestra.deployment",
+    "codestra.replica"
+  ],
+  "prometheusLabels": [
+    "codestra_business",
+    "application",
+    "service",
+    "environment",
+    "region",
+    "deployment",
+    "replica",
+    "server"
+  ],
+  "valueRules": {
+    "codestra.business": {
+      "allowedValuesFrom": "businessScope"
+    },
+    "codestra.application": {
+      "regex": "^[a-z0-9][a-z0-9._-]{0,62}$"
+    },
+    "codestra.service": {
+      "regex": "^[a-z0-9][a-z0-9._-]{0,62}$"
+    },
+    "codestra.environment": {
+      "allowedValues": ["development", "test", "staging", "production"]
+    },
+    "codestra.region": {
+      "regex": "^[a-z0-9][a-z0-9._-]{0,31}$"
+    },
+    "codestra.deployment": {
+      "regex": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$"
+    },
+    "codestra.replica": {
+      "regex": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$"
+    }
+  },
+  "ownership": {
+    "labelsSetByDeploymentAuthority": true,
+    "applicationMayNotOverrideBusiness": true,
+    "customerOrUserInputAllowed": false,
+    "unknownOrIncompleteContainersDroppedFromCorporateMetrics": true
+  },
+  "forbiddenMetricLabels": [
+    "id",
+    "name",
+    "image",
+    "container_id",
+    "container_name",
+    "image_id",
+    "image_digest",
+    "container_label_com_docker_compose_config_hash",
+    "container_label_com_docker_compose_project_working_dir",
+    "container_label_com_docker_compose_project_config_files",
+    "container_label_org_opencontainers_image_created",
+    "container_label_org_opencontainers_image_revision",
+    "container_label_org_opencontainers_image_source",
+    "container_label_org_opencontainers_image_url",
+    "container_label_org_opencontainers_image_version",
+    "tenant_id",
+    "customer_id",
+    "account_id",
+    "user_id",
+    "email",
+    "phone",
+    "request_id",
+    "correlation_id",
+    "trace_id",
+    "span_id",
+    "message_id",
+    "order_id"
+  ],
+  "cardinality": {
+    "maximumApplicationsPerBusinessPerEnvironment": 100,
+    "maximumServicesPerApplicationPerEnvironment": 100,
+    "maximumReplicasPerServicePerEnvironment": 100,
+    "containerIdsRetained": false,
+    "containerNamesRetained": false,
+    "imageReferencesRetained": false,
+    "arbitraryDockerLabelsRetained": false
+  }
+}

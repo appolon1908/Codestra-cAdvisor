@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "component": "cadvisor",
+  "role": "container-resource-metrics-exporter",
+  "canonicalHostname": "cadv.codestra.media",
+  "exposure": "internal_private",
+  "status": "SOURCE_PREPARED_NOT_DEPLOYED",
+  "containerMetricScope": ["cpu", "memory", "network", "filesystem", "io", "throttling", "oom", "lifecycle"],
+  "normalizedLabels": ["codestra_business", "application", "service", "environment", "server", "deployment", "container_role"],
+  "dropLabels": ["container_id_full", "ephemeral_hashes", "dynamic_path_labels", "customer_identifiers", "request_identifiers"],
+  "features": {
+    "resourceSaturation": true,
+    "cpuThrottling": true,
+    "oomSignals": true,
+    "restartCorrelation": true,
+    "containerNetworkMetrics": true,
+    "filesystemIoMetrics": true,
+    "labelNormalization": true,
+    "noisyContainerDetection": true
+  },
+  "security": {
+    "publicNativePortAllowed": false,
+    "readOnlyRuntimeObservation": true,
+    "prometheusPrivateScrapeOnly": true
+  }
+}
