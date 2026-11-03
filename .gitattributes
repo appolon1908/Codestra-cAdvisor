@@ -1,0 +1,2 @@
+# Preserve the reviewed upstream snapshot byte-for-byte.
+upstream/** -whitespace

@@ -1,0 +1,7 @@
+**
+!deploy/
+deploy/**
+!deploy/Dockerfile.cadvisor
+!deploy/Dockerfile.proxy
+!deploy/healthcheck.go
+!deploy/proxy.go

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "artifactModel": "repository-built-signed-images",
+  "component": "cadvisor",
+  "buildFrontendImage": "docker.io/docker/dockerfile@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e",
+  "builderImage": "docker.io/library/golang@sha256:98e6cffc31ccc44c7c15d83df1d69891efee8115a5bb7ede2bf30a38af3e3c92",
+  "cadvisorUpstreamTag": "v0.60.5",
+  "cadvisorUpstreamTagCommit": "44b8e3062d678022939d40b2a2e9b259b07ebab0",
+  "cadvisorBinaryVersionReadback": "v0.60.5-codestra.1",
+  "cadvisorBinaryRevisionReadback": "6a0c4f2",
+  "cadvisorBaseImage": "ghcr.io/google/cadvisor@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe",
+  "proxyRuntimeImage": "gcr.io/distroless/static-debian12@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab",
+  "vendoredSourceSnapshotCommit": "6a0c4f2539a8b1c11215804dee404c06fe3e0218",
+  "vendoredSourceUsedByImageBuild": true,
+  "productionActivation": false
+}

@@ -1,0 +1,266 @@
+name: codestra-cadvisor
+
+services:
+  docker-api-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.proxy
+      args:
+        GO_BUILDER_IMAGE: ${GO_BUILDER_IMAGE:?set an immutable Go builder image including sha256 digest}
+        PROXY_RUNTIME_IMAGE: ${PROXY_RUNTIME_IMAGE:?set an immutable minimal runtime image including sha256 digest}
+    image: ${CODESTRA_CADVISOR_PROXY_IMAGE:?set the immutable Codestra cAdvisor proxy image including sha256 digest}
+    entrypoint: ["/codestra-cadvisor-proxy"]
+    restart: unless-stopped
+    init: true
+    user: "65532:${DOCKER_SOCKET_GID:?required Docker socket group ID}"
+    group_add:
+      - "${DOCKER_SOCKET_GID:?required Docker socket group ID}"
+    read_only: true
+    stop_grace_period: 30s
+    environment:
+      CODESTRA_PROXY_MODE: docker-api
+      PROXY_LISTEN_ADDRESS: 0.0.0.0:2375
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      MAX_CONCURRENT_REQUESTS: "32"
+      CODESTRA_HEALTHCHECK_URL: http://127.0.0.1:2375/healthz
+    expose:
+      - "2375"
+    networks:
+      - cadvisor-docker-api
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/codestra-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      codestra.business: platform
+      codestra.application: observability
+      codestra.service: cadvisor-docker-api-proxy
+      codestra.environment: ${CODESTRA_ENVIRONMENT:?required}
+      codestra.region: ${CODESTRA_REGION:?required}
+      codestra.server: ${CODESTRA_SERVER:?required canonical server name}
+      codestra.deployment: ${CODESTRA_CADVISOR_DEPLOYMENT_ID:?required immutable deployment ID}
+      codestra.security.read-only-docker-api: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 192M
+          pids: 128
+        reservations:
+          cpus: "0.05"
+          memory: 48M
+
+  cadvisor:
+    build:
+      context: ../..
+      dockerfile: codestra/deploy/Dockerfile.cadvisor
+      args:
+        GO_BUILDER_IMAGE: ${GO_BUILDER_IMAGE:?set an immutable Go builder image including sha256 digest}
+        CADVISOR_BASE_IMAGE: ${CADVISOR_BASE_IMAGE:?set an immutable official cAdvisor image including sha256 digest}
+    image: ${CODESTRA_CADVISOR_IMAGE:?set the immutable Codestra cAdvisor image including sha256 digest}
+    command:
+      - --docker=tcp://docker-api-proxy:2375
+      - --docker_only=true
+      - --docker_root=/var/lib/docker
+      - --listen_ip=0.0.0.0
+      - --port=8080
+      - --prometheus_endpoint=/metrics
+      - --housekeeping_interval=15s
+      - --max_housekeeping_interval=60s
+      - --allow_dynamic_housekeeping=true
+      - --global_housekeeping_interval=60s
+      - --storage_duration=2m
+      - --disable_root_cgroup_stats=true
+      - --store_container_labels=false
+      - --whitelisted_container_labels=codestra.business,codestra.application,codestra.service,codestra.environment,codestra.region,codestra.deployment,codestra.replica
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,perf_event,process,referenced_memory,resctrl,sched,tcp,udp
+      - --profiling=false
+      - --event_storage_event_limit=default=0
+      - --event_storage_age_limit=default=0
+    restart: unless-stopped
+    init: true
+    user: "0:0"
+    read_only: true
+    stop_grace_period: 60s
+    environment:
+      CODESTRA_HEALTHCHECK_URL: http://127.0.0.1:8080/healthz
+    expose:
+      - "8080"
+    depends_on:
+      docker-api-proxy:
+        condition: service_healthy
+    networks:
+      - cadvisor-docker-api
+      - cadvisor-metrics
+    volumes:
+      - type: bind
+        source: /
+        target: /rootfs
+        read_only: true
+        bind:
+          propagation: rslave
+      - type: bind
+        source: /sys
+        target: /sys
+        read_only: true
+        bind:
+          propagation: rprivate
+      - type: bind
+        source: ${CADVISOR_DOCKER_ROOT_PATH:-/var/lib/docker}
+        target: /var/lib/docker
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: ${CADVISOR_DEVICE_METADATA_PATH:-/dev/disk}
+        target: /dev/disk
+        read_only: true
+        bind:
+          propagation: rprivate
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run:size=16m,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/codestra-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 25m
+        max-file: "3"
+    labels:
+      codestra.business: platform
+      codestra.application: observability
+      codestra.service: cadvisor
+      codestra.environment: ${CODESTRA_ENVIRONMENT:?required}
+      codestra.region: ${CODESTRA_REGION:?required}
+      codestra.server: ${CODESTRA_SERVER:?required canonical server name}
+      codestra.deployment: ${CODESTRA_CADVISOR_DEPLOYMENT_ID:?required immutable deployment ID}
+      codestra.telemetry.container-metrics-authority: "true"
+      codestra.security.direct-docker-socket: "false"
+      codestra.security.privileged: "false"
+      codestra.security.host-network: "false"
+      codestra.security.host-pid: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1G
+          pids: 512
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  cadvisor-metrics-proxy:
+    image: ${CODESTRA_CADVISOR_PROXY_IMAGE:?set the immutable Codestra cAdvisor proxy image including sha256 digest}
+    entrypoint: ["/codestra-cadvisor-proxy"]
+    restart: unless-stopped
+    init: true
+    user: "65532:65532"
+    read_only: true
+    stop_grace_period: 30s
+    environment:
+      CODESTRA_PROXY_MODE: metrics-mtls
+      PROXY_LISTEN_ADDRESS: 0.0.0.0:9443
+      METRICS_UPSTREAM_URL: http://cadvisor:8080
+      TLS_CERT_FILE: /run/secrets/cadvisor_proxy_server_cert
+      TLS_KEY_FILE: /run/secrets/cadvisor_proxy_server_key
+      TLS_CLIENT_CA_FILE: /run/secrets/prometheus_client_ca
+      MAX_CONCURRENT_REQUESTS: "16"
+      CODESTRA_HEALTHCHECK_ADDRESS: 127.0.0.1:9443
+    secrets:
+      - cadvisor_proxy_server_cert
+      - cadvisor_proxy_server_key
+      - prometheus_client_ca
+    expose:
+      - "9443"
+    depends_on:
+      cadvisor:
+        condition: service_healthy
+    networks:
+      - cadvisor-metrics
+      - codestra-observability
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/codestra-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      codestra.business: platform
+      codestra.application: observability
+      codestra.service: cadvisor-metrics-proxy
+      codestra.environment: ${CODESTRA_ENVIRONMENT:?required}
+      codestra.region: ${CODESTRA_REGION:?required}
+      codestra.server: ${CODESTRA_SERVER:?required canonical server name}
+      codestra.deployment: ${CODESTRA_CADVISOR_DEPLOYMENT_ID:?required immutable deployment ID}
+      codestra.security.prometheus-mtls: "required"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 192M
+          pids: 128
+        reservations:
+          cpus: "0.05"
+          memory: 48M
+
+networks:
+  cadvisor-docker-api:
+    internal: true
+  cadvisor-metrics:
+    internal: true
+  codestra-observability:
+    external: true
+    name: ${CODESTRA_OBSERVABILITY_NETWORK:-codestra-observability}
+
+secrets:
+  cadvisor_proxy_server_cert:
+    external: true
+    name: ${CADVISOR_PROXY_SERVER_CERT_SECRET_NAME:-cadvisor-proxy-server-cert}
+  cadvisor_proxy_server_key:
+    external: true
+    name: ${CADVISOR_PROXY_SERVER_KEY_SECRET_NAME:-cadvisor-proxy-server-key}
+  prometheus_client_ca:
+    external: true
+    name: ${PROMETHEUS_CLIENT_CA_SECRET_NAME:-prometheus-client-ca}

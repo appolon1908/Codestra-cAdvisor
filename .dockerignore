@@ -1,0 +1,9 @@
+**
+!codestra/
+codestra/**
+!codestra/deploy/
+codestra/deploy/**
+!codestra/deploy/Dockerfile.cadvisor
+!codestra/deploy/healthcheck.go
+!upstream/
+!upstream/**

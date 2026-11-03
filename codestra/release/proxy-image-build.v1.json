@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "imageId": "cadvisor-proxy",
+  "dockerfile": "codestra/deploy/Dockerfile.proxy",
+  "context": "codestra",
+  "buildArgs": {
+    "GO_BUILDER_IMAGE": "docker.io/library/golang@sha256:98e6cffc31ccc44c7c15d83df1d69891efee8115a5bb7ede2bf30a38af3e3c92",
+    "PROXY_RUNTIME_IMAGE": "gcr.io/distroless/static-debian12@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab"
+  },
+  "license": "Apache-2.0",
+  "description": "Least-privilege Docker metadata and mTLS metrics proxies for the Codestra cAdvisor boundary.",
+  "productionActivation": false
+}

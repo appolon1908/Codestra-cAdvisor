@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "component": "cadvisor",
+  "codestraRole": "container resource metrics authority",
+  "corporatePurpose": "Expose normalized container CPU, memory, network, filesystem, restart and throttling signals across Codestra workloads.",
+  "businessPortfolio": ["codestra", "moneybee", "beyvra", "breero", "larim-a", "transportation", "booked4seasons", "social", "klyrow", "telnexa", "kyqra", "restaurant", "provisioning"],
+  "standardDimensions": ["codestra_business", "application", "service", "environment", "server", "region", "deployment"],
+  "forbiddenLabels": ["tenant_id", "customer_id", "user_id", "email", "phone", "request_id", "trace_id", "message_id", "financial_transaction_id"],
+  "corporateFeatures": ["container_cpu_memory", "container_io_network", "oom_detection", "restart_detection", "cpu_throttling", "normalized_container_labels", "business_workload_mapping"],
+  "dashboardContribution": ["container_health", "workload_capacity", "restart_and_oom_panels", "noisy_neighbor_detection"],
+  "beyvraBoundary": "Container labels may map Beyvra workloads to safe business/service names only; no financial identifiers.",
+  "activationStatus": "SOURCE_PREPARED_NOT_DEPLOYED"
+}
